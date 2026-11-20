@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Craps – Engine v0.3</title>
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--text:#1d2a22;--muted:#5f6b63;--line:#cfd6d0;--felt:#0f5a3a;--felt2:#0b4630;--gold:#e0a82e;--ok:#1b7a43;--bad:#b3261e;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101613;--panel:#18211c;--text:#e8efe9;--muted:#98a69c;--line:#2b3a31;--ok:#4cc27d;--bad:#ff8a80;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#101613;--panel:#18211c;--text:#e8efe9;--muted:#98a69c;--line:#2b3a31;--ok:#4cc27d;--bad:#ff8a80;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 Georgia,"Times New Roman",serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:0 0 12px}
+.top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.bank{font-size:1.1rem}.bank b{font-size:1.5rem}
+.table{background:radial-gradient(ellipse at center,var(--felt),var(--felt2));border:6px solid #5a3a1e;border-radius:18px;padding:16px;color:#f4f1e6}
+.stage{display:flex;align-items:center;justify-content:center;gap:20px;margin-bottom:14px}
+.dice{font-size:4rem;line-height:1;letter-spacing:6px;min-width:130px;text-align:center}
+.puck{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;text-align:center;font-weight:bold;border:3px solid #fff;font-size:.95rem;line-height:1.1}
+.puck.off{background:#111;color:#fff}.puck.on{background:#fff;color:#111}
+.spots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.spot{background:rgba(0,0,0,.25);border:2px solid rgba(255,255,255,.35);border-radius:10px;color:inherit;padding:12px 8px;font:inherit;cursor:pointer;text-align:center}
+.spot:hover:not(:disabled){border-color:var(--gold)}
+.spot:disabled{opacity:.4;cursor:not-allowed}
+.spot small{display:block;opacity:.85}.spot .amt{font-size:1.3rem;color:var(--gold)}
+.row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:14px}
+.chip{width:52px;height:52px;border-radius:50%;border:4px dashed #fff;font:bold 1rem Georgia,serif;color:#fff;cursor:pointer}
+.chip[aria-pressed="true"]{outline:3px solid var(--gold);outline-offset:2px}
+.c1{background:#3a5ba0}.c5{background:#b3261e}.c25{background:#1b7a43}.c100{background:#222}
+.roll{background:var(--gold);color:#1a1200;border:0;border-radius:10px;padding:12px 28px;font:bold 1.1rem Georgia,serif;cursor:pointer}
+.ghost{background:transparent;color:inherit;border:1px solid rgba(255,255,255,.5);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.msg{min-height:1.5em;text-align:center;margin-top:10px;color:#ffd9d6}
+.log,details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:14px}
+.log ol{margin:6px 0 0;padding-left:20px;color:var(--muted)}.log li:first-child{color:var(--text)}
+.win{color:var(--ok)}.lose{color:var(--bad)}
+summary{cursor:pointer}
+#tests ul{list-style:none;padding:0;margin:8px 0 0;font:13px/1.5 ui-monospace,Menlo,monospace}
+#tests li.p::before{content:"✓ ";color:var(--ok)}#tests li.f::before{content:"✗ ";color:var(--bad)}
+.pbl{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin-top:10px}
+.pblc{background:rgba(0,0,0,.25);border:2px solid rgba(255,255,255,.35);border-radius:10px;padding:6px;text-align:center}
+.pblc b{font-size:1.3rem;color:var(--gold)}
+.pblc button{display:block;width:100%;margin-top:4px;padding:6px;background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.35);border-radius:6px;font:inherit;cursor:pointer}
+.pblc button:hover{border-color:var(--gold)}
+p.note{color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<div class="top"><h1>Craps – engine v0.3</h1><div class="bank">Bankroll <b id="bank"></b></div></div>
+
+<section class="table" aria-label="Craps table">
+  <div class="stage"><div class="dice" id="dice" aria-live="polite">⚀ ⚀</div><div class="puck off" id="puck">OFF</div></div>
+  <div class="spots">
+    <button class="spot" data-bet="pass"><small>Pass line</small><span class="amt" id="a-pass">0</span></button>
+    <button class="spot" data-bet="dontPass"><small>Don’t pass (bar 12)</small><span class="amt" id="a-dontPass">0</span></button>
+    <button class="spot" data-bet="passOdds"><small>Pass odds</small><span class="amt" id="a-passOdds">0</span></button>
+    <button class="spot" data-bet="dontPassOdds"><small>Don’t pass odds</small><span class="amt" id="a-dontPassOdds">0</span></button>
+    <button class="spot" data-bet="come"><small>Come (waiting)</small><span class="amt" id="a-come">0</span></button>
+    <button class="spot" data-bet="dontCome"><small>Don’t come (waiting)</small><span class="amt" id="a-dontCome">0</span></button>
+  </div>
+  <div class="spots" id="numbered" style="margin-top:10px"></div>
+  <div class="pbl" id="pbl"></div>
+  <div class="row" id="chips">
+    <button class="chip c1" data-v="1">1</button><button class="chip c5" data-v="5" aria-pressed="true">5</button>
+    <button class="chip c25" data-v="25">25</button><button class="chip c100" data-v="100">100</button>
+  </div>
+  <div class="row"><button class="roll" id="roll">Roll</button><button class="ghost" id="takedown">Take down place/buy/lay</button><button class="ghost" id="reset">Reset game</button></div>
+  <div class="msg" id="msg" role="status"></div>
+</section>
+
+<section class="log"><strong>Roll history</strong><ol id="log"></ol></section>
+<p class="note">Odds max 2x the line bet. Tap a bet spot to place the selected chip. Line bets go down on the come-out roll; odds go behind the line after a point is set. Come and don’t come bets go down after a point is set, then travel to their own number on the next roll. Come odds are off on a come-out roll (returned if the bet resolves). Place, buy and lay bets are also off on a come-out roll and stay up after a win; buy charges 5% of the bet and lay 5% of the win, taken from winnings.</p>
+</main>
+
+<script src="engine.js"></script>
+<script>
+/* ============ UI ============ */
+const NAMES = { pass:"Pass line", dontPass:"Don’t pass", passOdds:"Pass odds", dontPassOdds:"Don’t pass odds",
+  come:"Come", dontCome:"Don’t come", comeOdds:"Come odds", place:"Place", buy:"Buy", lay:"Lay", dontComeOdds:"Don’t come odds" };
+let game = Craps.createGame(), chip = 5;
+const $ = id => document.getElementById(id);
+const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(2);
+
+function render(msg) {
+  $("bank").textContent = "$" + fmt(game.bankroll);
+  for (const k in game.bets) { $("a-" + k).textContent = fmt(game.bets[k]); }
+  const p = $("puck");
+  p.className = "puck " + (game.phase === "point" ? "on" : "off");
+  p.textContent = game.phase === "point" ? "ON " + game.point : "OFF";
+  const nb = $("numbered"); nb.innerHTML = "";
+  [["comeBets","comeOdds","Come"],["dcBets","dontComeOdds","Don’t come"]].forEach(([m, ok, label]) => {
+    Object.keys(game[m]).sort().forEach(n => {
+      const e = game[m][n], bt = document.createElement("button");
+      bt.className = "spot"; bt.dataset.bet = ok; bt.dataset.num = n;
+      bt.innerHTML = "<small>" + label + " " + n + " – tap to add odds</small><span class=\"amt\">" + fmt(e.bet) + " + " + fmt(e.odds) + "</span>";
+      bt.onclick = () => { const r = game.bet(ok, chip, +n); render(r.ok ? "" : r.error); };
+      nb.appendChild(bt);
+    });
+  });
+  document.querySelectorAll(".spot:not([data-num])").forEach(s => {
+    const t = s.dataset.bet, inPoint = t === "come" || t === "dontCome" || t.endsWith("Odds");
+    s.disabled = inPoint ? game.phase !== "point" : game.phase !== "comeout";
+  });
+  const box = $("pbl"); box.innerHTML = "";
+  [4,5,6,8,9,10].forEach(n => {
+    const c = document.createElement("div"); c.className = "pblc";
+    c.innerHTML = "<b>" + n + "</b>";
+    [["place","Place"],["buy","Buy"],["lay","Lay"]].forEach(([k, label]) => {
+      if (k === "buy" && (n === 6 || n === 8)) return;
+      const bt = document.createElement("button");
+      bt.textContent = label + " " + fmt(game[k][n] || 0);
+      bt.onclick = () => { const r = game.bet(k, chip, n); render(r.ok ? "" : r.error); };
+      c.appendChild(bt);
+    });
+    box.appendChild(c);
+  });
+  $("msg").textContent = msg || "";
+}
+
+document.querySelectorAll(".spot").forEach(s => s.onclick = () => {
+  const r = game.bet(s.dataset.bet, chip);
+  render(r.ok ? "" : r.error);
+});
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+  chip = +c.dataset.v;
+  document.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === c));
+});
+$("takedown").onclick = () => { const back = game.takeDown(); render(back ? "Took down $" + fmt(back) + " in place / buy / lay bets." : "No place, buy or lay bets to take down."); };
+$("reset").onclick = () => { game = Craps.createGame(); $("log").innerHTML = ""; $("dice").textContent = "⚀ ⚀"; render("New game. Bankroll reset to $500."); };
+$("roll").onclick = () => {
+  const r = game.roll(), face = n => String.fromCodePoint(0x267F + n);
+  $("dice").textContent = face(r.dice[0]) + " " + face(r.dice[1]);
+  let text = "Rolled " + r.total;
+  if (r.sevenOut) text += " – seven out, new shooter";
+  const parts = r.events.map(e => {
+    const cls = e.result === "win" ? "win" : e.result === "lose" ? "lose" : "";
+    const amt = e.result === "win" ? " +" + fmt(e.net) : e.result === "lose" ? " −" + fmt(-e.net) : " push";
+    return '<span class="' + cls + '">' + NAMES[e.bet] + (e.num ? " " + e.num : "") + amt + "</span>";
+  });
+  const li = document.createElement("li");
+  li.innerHTML = text + (r.phase === "point" && !r.events.length && r.total === game.point && game.shooterRolls ? " – point is " + game.point : "") +
+    (parts.length ? ": " + parts.join(", ") : "");
+  $("log").prepend(li);
+  while ($("log").children.length > 8) $("log").lastChild.remove();
+  render();
+};
+render();
+</script>
+</body>
+</html>
