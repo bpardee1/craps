@@ -3,6 +3,17 @@ const Craps = (() => {
   const PASS_ODDS = {4:[2,1],10:[2,1],5:[3,2],9:[3,2],6:[6,5],8:[6,5]}; // true-odds payouts
   const PLACE_PAYS = {4:[9,5],10:[9,5],5:[7,5],9:[7,5],6:[7,6],8:[7,6]}; // place bet payouts
   const COMMISSION = 0.05; // buy: 5% of the bet on a win; lay: 5% of the win
+  const HARD_PAYS = {4:[7,1],10:[7,1],6:[9,1],8:[9,1]}; // hardways payouts
+  // One-roll bets: the roll either wins (pays the ratio) or loses. Field pays per total (see fieldPay).
+  const ONE_ROLL = {
+    field:    { wins:[2,3,4,9,10,11,12], pay:[1,1] },
+    anySeven: { wins:[7],      pay:[4,1] },
+    anyCraps: { wins:[2,3,12], pay:[7,1] },
+    two:      { wins:[2],      pay:[30,1] }, // aces
+    three:    { wins:[3],      pay:[15,1] }, // ace-deuce
+    eleven:   { wins:[11],     pay:[15,1] }, // yo
+    twelve:   { wins:[12],     pay:[30,1] }, // boxcars
+  };
   const DICE = {2:[1,1],3:[1,2],4:[2,2],5:[2,3],6:[3,3],7:[3,4],8:[4,4],9:[4,5],10:[5,5],11:[5,6],12:[6,6]};
   const r2 = n => Math.round(n * 100) / 100;
   const randomRoller = () => [1 + Math.floor(Math.random()*6), 1 + Math.floor(Math.random()*6)];
@@ -11,17 +22,29 @@ const Craps = (() => {
   function createGame(opts = {}) {
     const roller = opts.roller || randomRoller;
     const maxOdds = opts.maxOdds ?? 2;
+    const hardwaysWorkOnComeout = opts.hardwaysWorkOnComeout ?? true; // like the "Hardways on" switch on Crapsee
+    const fieldPay = t => t === 2 ? [opts.field2Pays ?? 2, 1] : t === 12 ? [opts.field12Pays ?? 2, 1] : [1, 1];
     const placeOffOnComeout = opts.placeOffOnComeout ?? true; // place / buy / lay are off on come-out rolls
     const oddsOffOnComeout = opts.oddsOffOnComeout ?? true; // standard house rule for come-bet odds
     const g = { phase:"comeout", point:null, bankroll: opts.bankroll ?? 500, rolls:0, shooterRolls:0,
-                bets:{ pass:0, dontPass:0, passOdds:0, dontPassOdds:0, come:0, dontCome:0 },
-                comeBets:{}, dcBets:{}, place:{}, buy:{}, lay:{} }; // place / buy / lay: { number: amount } // numbered come / don’t come bets: { number: {bet, odds} }
+                bets:{ pass:0, dontPass:0, passOdds:0, dontPassOdds:0, come:0, dontCome:0,
+                ...Object.fromEntries(Object.keys(ONE_ROLL).map(k => [k, 0])) },
+                comeBets:{}, dcBets:{}, place:{}, buy:{}, lay:{}, hard:{} }; // place / buy / lay: { number: amount } // numbered come / don’t come bets: { number: {bet, odds} }
     const err = error => ({ ok:false, error });
 
     g.bet = (type, amt, num) => {
       if (!(amt > 0)) return err("Bet must be more than 0.");
-      if (!(type in g.bets) && !["comeOdds","dontComeOdds","place","buy","lay"].includes(type)) return err("Unknown bet.");
+      if (!(type in g.bets) && !["comeOdds","dontComeOdds","place","buy","lay","hard"].includes(type)) return err("Unknown bet.");
       if (amt > g.bankroll) return err("Not enough bankroll.");
+      if (type in ONE_ROLL) { // field and propositions: one roll, then gone
+        g.bankroll = r2(g.bankroll - amt); g.bets[type] = r2(g.bets[type] + amt);
+        return { ok:true };
+      }
+      if (type === "hard") {
+        if (![4,6,8,10].includes(num)) return err("Hardways are on 4, 6, 8 or 10.");
+        g.hard[num] = r2((g.hard[num] || 0) + amt); g.bankroll = r2(g.bankroll - amt);
+        return { ok:true };
+      }
       if (type === "place" || type === "buy" || type === "lay") {
         const allowed = type === "buy" ? [4,5,9,10] : [4,5,6,8,9,10];
         if (!allowed.includes(num)) return err(type === "buy" ? "Buy bets are on 4, 5, 9 or 10." : "Pick 4, 5, 6, 8, 9 or 10.");
@@ -52,7 +75,7 @@ const Craps = (() => {
 
     g.takeDown = () => { // return all place / buy / lay bets to the bankroll
       let back = 0;
-      for (const k of ["place","buy","lay"]) { for (const n in g[k]) back += g[k][n]; g[k] = {}; }
+      for (const k of ["place","buy","lay","hard"]) { for (const n in g[k]) back += g[k][n]; g[k] = {}; }
       g.bankroll = r2(g.bankroll + back); return back;
     };
 
@@ -96,10 +119,23 @@ const Craps = (() => {
         else if (total === 12) settle("dontCome","push");
         else { const e = g.dcBets[total] || (g.dcBets[total] = { bet:0, odds:0 }); e.bet = r2(e.bet + b.dontCome); b.dontCome = 0; }
       }
+      const stay = (k, n, net) => { g.bankroll = r2(g.bankroll + net); events.push({ bet:k, num:n, result:"win", net }); };
+      const drop = (k, n) => { events.push({ bet:k, num:+n, result:"lose", net:-g[k][n] }); delete g[k][n]; };
+      // Field and propositions: decided by this one roll.
+      for (const k of Object.keys(ONE_ROLL)) {
+        if (!b[k]) continue;
+        if (ONE_ROLL[k].wins.includes(total)) settle(k, "win", k === "field" ? fieldPay(total) : ONE_ROLL[k].pay);
+        else settle(k, "lose");
+      }
+      // Hardways: win on the hard way (doubles), lose on the easy way or a 7. Winning bets stay up.
+      if (hardwaysWorkOnComeout || g.phase !== "comeout") {
+        for (const n of Object.keys(g.hard)) {
+          if (total === +n && dice[0] === dice[1]) stay("hard", +n, r2(g.hard[n] * HARD_PAYS[n][0] / HARD_PAYS[n][1]));
+          else if (total === +n || total === 7) drop("hard", n);
+        }
+      }
       // Place / buy / lay: off on come-out rolls by default; winning bets stay up.
       if (!(placeOffOnComeout && g.phase === "comeout")) {
-        const stay = (k, n, net) => { g.bankroll = r2(g.bankroll + net); events.push({ bet:k, num:n, result:"win", net }); };
-        const drop = (k, n) => { events.push({ bet:k, num:+n, result:"lose", net:-g[k][n] }); delete g[k][n]; };
         for (const n of Object.keys(g.place)) {
           if (total === +n) stay("place", +n, r2(g.place[n] * PLACE_PAYS[n][0] / PLACE_PAYS[n][1]));
           else if (total === 7) drop("place", n);

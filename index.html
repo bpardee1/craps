@@ -64,11 +64,21 @@ p.note{color:var(--muted);font-size:.9rem}
   </div>
   <div class="spots" id="numbered" style="margin-top:10px"></div>
   <div class="pbl" id="pbl"></div>
+  <div class="spots" id="props" style="margin-top:10px">
+    <button class="spot" data-bet="field"><small>Field (2 &amp; 12 pay double)</small><span class="amt" id="a-field">0</span></button>
+    <button class="spot" data-bet="anySeven"><small>Any seven (4 to 1)</small><span class="amt" id="a-anySeven">0</span></button>
+    <button class="spot" data-bet="anyCraps"><small>Any craps (7 to 1)</small><span class="amt" id="a-anyCraps">0</span></button>
+    <button class="spot" data-bet="two"><small>Aces 2 (30 to 1)</small><span class="amt" id="a-two">0</span></button>
+    <button class="spot" data-bet="three"><small>Ace-deuce 3 (15 to 1)</small><span class="amt" id="a-three">0</span></button>
+    <button class="spot" data-bet="eleven"><small>Yo 11 (15 to 1)</small><span class="amt" id="a-eleven">0</span></button>
+    <button class="spot" data-bet="twelve"><small>Boxcars 12 (30 to 1)</small><span class="amt" id="a-twelve">0</span></button>
+  </div>
+  <div class="pbl" id="hard"></div>
   <div class="row" id="chips">
     <button class="chip c1" data-v="1">1</button><button class="chip c5" data-v="5" aria-pressed="true">5</button>
     <button class="chip c25" data-v="25">25</button><button class="chip c100" data-v="100">100</button>
   </div>
-  <div class="row"><button class="roll" id="roll">Roll</button><button class="ghost" id="takedown">Take down place/buy/lay</button><button class="ghost" id="reset">Reset game</button></div>
+  <div class="row"><button class="roll" id="roll">Roll</button><button class="ghost" id="takedown">Take down place/buy/lay/hard</button><button class="ghost" id="reset">Reset game</button></div>
   <div class="msg" id="msg" role="status"></div>
 </section>
 
@@ -80,7 +90,7 @@ p.note{color:var(--muted);font-size:.9rem}
 <script>
 /* ============ UI ============ */
 const NAMES = { pass:"Pass line", dontPass:"Don’t pass", passOdds:"Pass odds", dontPassOdds:"Don’t pass odds",
-  come:"Come", dontCome:"Don’t come", comeOdds:"Come odds", place:"Place", buy:"Buy", lay:"Lay", dontComeOdds:"Don’t come odds" };
+  come:"Come", dontCome:"Don’t come", comeOdds:"Come odds", hard:"Hard", field:"Field", anySeven:"Any seven", anyCraps:"Any craps", two:"Aces (2)", three:"Ace-deuce (3)", eleven:"Yo (11)", twelve:"Boxcars (12)", place:"Place", buy:"Buy", lay:"Lay", dontComeOdds:"Don’t come odds" };
 let game = Craps.createGame(), chip = 5;
 const $ = id => document.getElementById(id);
 const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(2);
@@ -103,7 +113,7 @@ function render(msg) {
   });
   document.querySelectorAll(".spot:not([data-num])").forEach(s => {
     const t = s.dataset.bet, inPoint = t === "come" || t === "dontCome" || t.endsWith("Odds");
-    s.disabled = inPoint ? game.phase !== "point" : game.phase !== "comeout";
+    s.disabled = inPoint ? game.phase !== "point" : (t === "pass" || t === "dontPass") ? game.phase !== "comeout" : false;
   });
   const box = $("pbl"); box.innerHTML = "";
   [4,5,6,8,9,10].forEach(n => {
@@ -117,6 +127,15 @@ function render(msg) {
       c.appendChild(bt);
     });
     box.appendChild(c);
+  });
+  const hb = $("hard"); hb.innerHTML = "";
+  [4,6,8,10].forEach(n => {
+    const c = document.createElement("div"); c.className = "pblc";
+    c.innerHTML = "<b>Hard " + n + "</b>";
+    const bt = document.createElement("button");
+    bt.textContent = fmt(game.hard[n] || 0) + " (" + (n === 4 || n === 10 ? "7" : "9") + " to 1)";
+    bt.onclick = () => { const r = game.bet("hard", chip, n); render(r.ok ? "" : r.error); };
+    c.appendChild(bt); hb.appendChild(c);
   });
   $("msg").textContent = msg || "";
 }
