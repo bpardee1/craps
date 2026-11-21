@@ -1,6 +1,6 @@
 {
   "name": "craps",
-  "version": "0.6.0",
+  "version": "0.9.0",
   "private": true,
   "description": "A craps game: a tested pure-JS engine plus a simple table UI.",
   "scripts": { "test": "node --test" }

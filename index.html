@@ -66,6 +66,7 @@ p.note{color:var(--muted);font-size:.9rem}
     <div><span>Shooter</span><b id="s-shooter">0.00</b></div><div><span>My bets</span><b id="s-bets">0</b></div>
     <div><span>My rack</span><b id="s-rack">0</b></div><div><span>Bankroll</span><b id="s-bankroll">0</b></div>
     <div><span>NET</span><b id="s-net">0.00</b></div>
+    <div><span>Across</span><b id="t-across">0</b></div><div><span>Inside</span><b id="t-inside">0</b></div><div><span>Outside</span><b id="t-outside">0</b></div><div><span>Field</span><b id="t-field">0</b></div>
   </div>
   <div class="dist" id="dist" aria-label="Roll distribution"></div>
   <div id="shooters" style="margin-top:10px"></div>
@@ -161,6 +162,7 @@ function render(msg) {
   sv("s-shooters", st.shooters); sv("s-rolls", st.rolls); sv("s-srr", game.srr().toFixed(2)); sv("s-sor", game.sor().toFixed(2));
   sv("s-bets", fmt(game.atRisk())); sv("s-rack", fmt(game.bankroll)); sv("s-bankroll", game.equity().toFixed(2));
   sv("s-shooter", money(game.shooterNet())); sv("s-net", money(game.net()));
+  ["across","inside","outside","field"].forEach(k => { const v = game.tally(k); sv("t-" + k, (v > 0 ? "+" : "") + v); $("t-" + k).className = v > 0 ? "win" : v < 0 ? "lose" : ""; });
   [["s-shooter", game.shooterNet()], ["s-net", game.net()]].forEach(([id, v]) => { $(id).className = v > 0 ? "win" : v < 0 ? "lose" : ""; });
   const mx = Math.max(1, ...Object.values(st.dist)), d = $("dist"); d.innerHTML = "";
   for (let n = 2; n <= 12; n++) {

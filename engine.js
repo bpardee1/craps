@@ -16,13 +16,16 @@ const Craps = (() => {
   };
   const DICE = {2:[1,1],3:[1,2],4:[2,2],5:[2,3],6:[3,3],7:[3,4],8:[4,4],9:[4,5],10:[5,5],11:[5,6],12:[6,6]};
   const r2 = n => Math.round(n * 100) / 100;
+  const cents = n => Math.floor(n * 100 + 1e-9) / 100; // Crapsee pays winnings truncated to the cent
+  const GROUPS = { across:[4,5,6,8,9,10], inside:[5,6,8,9], outside:[4,5,9,10], field:[2,3,4,9,10,11,12] };
+  const WAYS = {2:1,3:2,4:3,5:4,6:5,7:6,8:5,9:4,10:3,11:2,12:1}; // dice combinations out of 36
   const randomRoller = () => [1 + Math.floor(Math.random()*6), 1 + Math.floor(Math.random()*6)];
   const fixed = totals => { let i = 0; return () => DICE[totals[i++]]; }; // scripted dice for tests
 
   function createGame(opts = {}) {
     const roller = opts.roller || randomRoller;
     const maxOdds = opts.maxOdds ?? 2;
-    const hardwaysWorkOnComeout = opts.hardwaysWorkOnComeout ?? true; // like the "Hardways on" switch on Crapsee
+    const hardwaysWorkOnComeout = opts.hardwaysWorkOnComeout ?? false; // Crapsee switches Hardways and Bets off after a seven-out and back on once a point is set
     const fieldPay = t => t === 2 ? [opts.field2Pays ?? 2, 1] : t === 12 ? [opts.field12Pays ?? 2, 1] : [1, 1];
     const placeOffOnComeout = opts.placeOffOnComeout ?? true; // place / buy / lay are off on come-out rolls
     const oddsOffOnComeout = opts.oddsOffOnComeout ?? true; // standard house rule for come-bet odds
@@ -34,7 +37,7 @@ const Craps = (() => {
 
     // ---- money and statistics ----
     g.startBankroll = g.bankroll; g.shooterStart = g.bankroll;
-    g.stats = { rolls:0, shooters:0, sevens:0, sevenOuts:0, dist:{2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0}, log:[], shooterLog:[] };
+    g.stats = { rolls:0, shooters:0, sevens:0, sevenOuts:0, dist:{2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0}, log:[], shooterLog:[], pointRolls:0 };
     g.atRisk = () => { // all money currently on the table
       let t = 0;
       for (const k in g.bets) t += g.bets[k];
@@ -45,8 +48,14 @@ const Craps = (() => {
     g.equity = () => r2(g.bankroll + g.atRisk());          // rack + bets (Crapsee "Bankroll")
     g.net = () => r2(g.equity() - g.startBankroll);          // Crapsee "NET"
     g.shooterNet = () => r2(g.equity() - g.shooterStart);    // result of the current / last shooter
+    // Crapsee tallies: group hits minus the hits expected from the number of rolls (rounded half up, whole numbers)
+    g.tally = name => {
+      const set = GROUPS[name], ways = set.reduce((s, n) => s + WAYS[n], 0);
+      const hits = set.reduce((s, n) => s + g.stats.dist[n], 0);
+      return hits - Math.floor((2 * g.stats.rolls * ways + 36) / 72);
+    };
     g.srr = () => g.stats.sevens ? r2(g.stats.rolls / g.stats.sevens) : 0;             // rolls per seven
-    g.sor = () => g.stats.sevenOuts ? r2((g.stats.rolls - g.stats.sevenOuts) / g.stats.sevenOuts) : 0; // PROVISIONAL: rolls before the seven-out, per seven-out
+    g.sor = () => g.stats.sevenOuts ? r2(g.stats.pointRolls / g.stats.sevenOuts) : 0; // rolls made with a point on, per seven-out (come-out rolls do not count)
 
     g.bet = (type, amt, num) => {
       if (!(amt > 0)) return err("Bet must be more than 0.");
@@ -89,6 +98,14 @@ const Craps = (() => {
       return { ok:true };
     };
 
+    g.remove = (type, num) => { // take one bet down and get its stake back (line bets, odds and traveled come bets stay)
+      let amt = 0;
+      if (["place","buy","lay","hard"].includes(type)) { amt = g[type][num] || 0; delete g[type][num]; }
+      else if (type in g.bets && !["pass","dontPass","passOdds","dontPassOdds"].includes(type)) { amt = g.bets[type]; g.bets[type] = 0; }
+      else return err("That bet can\u2019t be taken down.");
+      if (!amt) return err("No such bet.");
+      g.bankroll = r2(g.bankroll + amt); return { ok:true, amount:amt };
+    };
     g.takeDown = () => { // return all place / buy / lay bets to the bankroll
       let back = 0;
       for (const k of ["place","buy","lay","hard"]) { for (const n in g[k]) back += g[k][n]; g[k] = {}; }
@@ -97,7 +114,7 @@ const Craps = (() => {
 
     g.roll = () => {
       const dice = roller(), total = dice[0] + dice[1], events = [], b = g.bets;
-      const before = g.equity();
+      const before = g.equity(), inPoint = g.phase === "point";
       if (g.shooterRolls === 0) { // a new shooter starts
         g.stats.shooters++; g.shooterStart = before;
         g.stats.shooterLog.unshift({ shooter:g.stats.shooters, points:0, rolls:0, net:0 });
@@ -108,7 +125,7 @@ const Craps = (() => {
       const resolve = (k, a, res, ratio = [1,1], num) => {
         if (!a) return;
         let net = 0;
-        if (res === "win") { net = r2(a * ratio[0] / ratio[1]); g.bankroll = r2(g.bankroll + a + net); }
+        if (res === "win") { net = cents(a * ratio[0] / ratio[1]); g.bankroll = r2(g.bankroll + a + net); }
         else if (res === "push") g.bankroll = r2(g.bankroll + a);
         else net = -a;
         events.push({ bet:k, num, result:res, net });
@@ -147,50 +164,60 @@ const Craps = (() => {
       // Field and propositions: decided by this one roll.
       for (const k of Object.keys(ONE_ROLL)) {
         if (!b[k]) continue;
-        if (ONE_ROLL[k].wins.includes(total)) settle(k, "win", k === "field" ? fieldPay(total) : ONE_ROLL[k].pay);
+        if (ONE_ROLL[k].wins.includes(total)) { // a winning one-roll bet is paid and stays up (as on Crapsee); a loser comes down
+          const [x, y] = k === "field" ? fieldPay(total) : ONE_ROLL[k].pay;
+          stay(k, undefined, cents(b[k] * x / y));
+        }
         else settle(k, "lose");
       }
       // Hardways: win on the hard way (doubles), lose on the easy way or a 7. Winning bets stay up.
       if (hardwaysWorkOnComeout || g.phase !== "comeout") {
         for (const n of Object.keys(g.hard)) {
-          if (total === +n && dice[0] === dice[1]) stay("hard", +n, r2(g.hard[n] * HARD_PAYS[n][0] / HARD_PAYS[n][1]));
+          if (total === +n && dice[0] === dice[1]) stay("hard", +n, cents(g.hard[n] * HARD_PAYS[n][0] / HARD_PAYS[n][1]));
           else if (total === +n || total === 7) drop("hard", n);
         }
       }
       // Place / buy / lay: off on come-out rolls by default; winning bets stay up.
       if (!(placeOffOnComeout && g.phase === "comeout")) {
         for (const n of Object.keys(g.place)) {
-          if (total === +n) stay("place", +n, r2(g.place[n] * PLACE_PAYS[n][0] / PLACE_PAYS[n][1]));
+          if (total === +n) stay("place", +n, cents(g.place[n] * PLACE_PAYS[n][0] / PLACE_PAYS[n][1]));
           else if (total === 7) drop("place", n);
         }
         for (const n of Object.keys(g.buy)) {
-          if (total === +n) stay("buy", +n, r2(g.buy[n] * PASS_ODDS[n][0] / PASS_ODDS[n][1] - g.buy[n] * COMMISSION));
+          if (total === +n) stay("buy", +n, cents(g.buy[n] * PASS_ODDS[n][0] / PASS_ODDS[n][1] - g.buy[n] * COMMISSION));
           else if (total === 7) drop("buy", n);
         }
         for (const n of Object.keys(g.lay)) { // lay wins on 7, loses when its number rolls
           const win = g.lay[n] * PASS_ODDS[n][1] / PASS_ODDS[n][0];
-          if (total === 7) stay("lay", +n, r2(win - win * COMMISSION));
+          if (total === 7) stay("lay", +n, cents(win - win * COMMISSION));
           else if (total === +n) drop("lay", n);
         }
       }
+      const lineWin = k => { if (b[k]) stay(k, undefined, cents(b[k])); }; // a winning line bet is paid and stays up (Crapsee)
       let sevenOut = false;
       if (g.phase === "comeout") {
-        if (total === 7 || total === 11) { settle("pass","win"); settle("dontPass","lose"); }
-        else if (total === 2 || total === 3) { settle("pass","lose"); settle("dontPass","win"); }
+        if (total === 7 || total === 11) { lineWin("pass"); settle("dontPass","lose"); }
+        else if (total === 2 || total === 3) { settle("pass","lose"); lineWin("dontPass"); }
         else if (total === 12) { settle("pass","lose"); settle("dontPass","push"); }
         else { g.phase = "point"; g.point = total; }
       } else if (total === g.point) {
-        settle("pass","win"); settle("passOdds","win", PASS_ODDS[g.point]);
+        lineWin("pass"); settle("passOdds","win", PASS_ODDS[g.point]);
         settle("dontPass","lose"); settle("dontPassOdds","lose");
         g.phase = "comeout"; g.point = null;
       } else if (total === 7) {
         const [n, d] = PASS_ODDS[g.point];
         settle("pass","lose"); settle("passOdds","lose");
-        settle("dontPass","win"); settle("dontPassOdds","win", [d, n]); // lay odds pay the inverse
+        lineWin("dontPass"); settle("dontPassOdds","win", [d, n]); // lay odds pay the inverse
         g.phase = "comeout"; g.point = null; g.shooterRolls = 0; sevenOut = true;
       }
+      if (sevenOut) { // Crapsee clears the table after a seven-out: winning bets (lays) are paid and come down too
+        g.bankroll = r2(g.bankroll + g.atRisk());
+        for (const k in b) b[k] = 0;
+        for (const k of ["place","buy","lay","hard"]) g[k] = {};
+        g.comeBets = {}; g.dcBets = {};
+      }
       const st = g.stats;
-      st.rolls++; st.dist[total]++;
+      st.rolls++; st.dist[total]++; if (inPoint) st.pointRolls++;
       if (total === 7) st.sevens++;
       if (sevenOut) st.sevenOuts++;
       st.log.unshift({ shooter:st.shooters, roll:rollNo, dice, total, net: events.length ? r2(g.equity() - before) : null });
