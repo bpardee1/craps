@@ -32,6 +32,22 @@ const Craps = (() => {
                 comeBets:{}, dcBets:{}, place:{}, buy:{}, lay:{}, hard:{} }; // place / buy / lay: { number: amount } // numbered come / don’t come bets: { number: {bet, odds} }
     const err = error => ({ ok:false, error });
 
+    // ---- money and statistics ----
+    g.startBankroll = g.bankroll; g.shooterStart = g.bankroll;
+    g.stats = { rolls:0, shooters:0, sevens:0, sevenOuts:0, dist:{2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0}, log:[], shooterLog:[] };
+    g.atRisk = () => { // all money currently on the table
+      let t = 0;
+      for (const k in g.bets) t += g.bets[k];
+      for (const m of [g.comeBets, g.dcBets]) for (const n in m) t += m[n].bet + m[n].odds;
+      for (const k of ["place","buy","lay","hard"]) for (const n in g[k]) t += g[k][n];
+      return r2(t);
+    };
+    g.equity = () => r2(g.bankroll + g.atRisk());          // rack + bets (Crapsee "Bankroll")
+    g.net = () => r2(g.equity() - g.startBankroll);          // Crapsee "NET"
+    g.shooterNet = () => r2(g.equity() - g.shooterStart);    // result of the current / last shooter
+    g.srr = () => g.stats.sevens ? r2(g.stats.rolls / g.stats.sevens) : 0;             // rolls per seven
+    g.sor = () => g.stats.sevenOuts ? r2((g.stats.rolls - g.stats.sevenOuts) / g.stats.sevenOuts) : 0; // PROVISIONAL: rolls before the seven-out, per seven-out
+
     g.bet = (type, amt, num) => {
       if (!(amt > 0)) return err("Bet must be more than 0.");
       if (!(type in g.bets) && !["comeOdds","dontComeOdds","place","buy","lay","hard"].includes(type)) return err("Unknown bet.");
@@ -81,7 +97,14 @@ const Craps = (() => {
 
     g.roll = () => {
       const dice = roller(), total = dice[0] + dice[1], events = [], b = g.bets;
+      const before = g.equity();
+      if (g.shooterRolls === 0) { // a new shooter starts
+        g.stats.shooters++; g.shooterStart = before;
+        g.stats.shooterLog.unshift({ shooter:g.stats.shooters, points:0, rolls:0, net:0 });
+      }
       g.rolls++; g.shooterRolls++;
+      const rollNo = g.shooterRolls;
+      const pointMade = g.phase === "point" && total === g.point; // shooter makes the point
       const resolve = (k, a, res, ratio = [1,1], num) => {
         if (!a) return;
         let net = 0;
@@ -166,6 +189,14 @@ const Craps = (() => {
         settle("dontPass","win"); settle("dontPassOdds","win", [d, n]); // lay odds pay the inverse
         g.phase = "comeout"; g.point = null; g.shooterRolls = 0; sevenOut = true;
       }
+      const st = g.stats;
+      st.rolls++; st.dist[total]++;
+      if (total === 7) st.sevens++;
+      if (sevenOut) st.sevenOuts++;
+      st.log.unshift({ shooter:st.shooters, roll:rollNo, dice, total, net: events.length ? r2(g.equity() - before) : null });
+      if (st.log.length > 200) st.log.pop();
+      const sh = st.shooterLog[0]; // Shooter tab: points made (P), rolls (R), net
+      sh.rolls = rollNo; if (pointMade) sh.points++; sh.net = r2(g.equity() - g.shooterStart);
       return { dice, total, events, sevenOut, phase:g.phase, point:g.point };
     };
     return g;

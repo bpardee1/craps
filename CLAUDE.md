@@ -26,8 +26,12 @@ Goal: a practice table modeled on crapsee.com.
 - Hardways: hard 4/10 pay 7:1, hard 6/8 pay 9:1; lose on the easy way or a 7; stay up after a win; work on the come-out by default (`hardwaysWorkOnComeout`).
 - `roll()` returns the dice and total, and the roller supplies both dice, so bets can depend on exact dice.
 
-## Next up
-1. Stats: roll distribution, shooter rolls, SRR, net.
+- Stats (`g.stats`, `g.srr()`, `g.sor()`, `g.net()`, `g.shooterNet()`, `g.equity()`): shooters, rolls, roll distribution, roll log with per-roll net. "Bankroll" = rack + money on the table; NET = bankroll minus starting bankroll; the "Shooter" figure holds the last shooter's result until the next shooter rolls.
+- Shooter summary (`g.stats.shooterLog`): per shooter P = points made, R = rolls, net. Bets placed after a seven-out do not change the last shooter's net (confirmed on Crapsee).
+- Chips larger than the rack are hidden in the UI (as on Crapsee).
+- SRR = rolls / sevens (matches Crapsee). SOR is PROVISIONAL: currently (rolls - sevenOuts) / sevenOuts, which matches the one Crapsee screenshot we have (2 rolls, 1 seven-out = 1.00). Confirm with more data.
+
+## Not built yet
+1. The Across / Inside / Outside / Field tallies from the Crapsee stats panel. Observed: after a 10: Across 0, Inside -1, Outside +1, Field +1. Then after a 7: Across 0, Inside -1, Outside 0, Field 0. Rules unknown; need more screenshots.
 2. General hop bets (any specific dice combination).
-3. UI polish to look like a real table (chip stacks on the felt, bet spots laid out like Crapsee).
-4. Optional switches in the UI for the come-out options (place/buy/lay, hardways, come odds).
+3. UI polish to look like a real table; hide chips larger than the rack; optional UI switches for the come-out options.

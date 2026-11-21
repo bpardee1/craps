@@ -45,12 +45,31 @@ summary{cursor:pointer}
 .pblc b{font-size:1.3rem;color:var(--gold)}
 .pblc button{display:block;width:100%;margin-top:4px;padding:6px;background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.35);border-radius:6px;font:inherit;cursor:pointer}
 .pblc button:hover{border-color:var(--gold)}
+.stats{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px 12px}
+.sgrid span{display:block;color:var(--muted);font-size:.8rem}.sgrid b{font-size:1.1rem}
+.dist{display:flex;align-items:flex-end;gap:4px;height:96px;margin-top:10px}
+.dist div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:.75rem;color:var(--muted)}
+.dist i{display:block;width:100%;background:#2f5fb3;border-radius:3px 3px 0 0}.dist .seven i{background:#b3261e}
+.srow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid var(--line);font-size:.9rem}.srow span{color:var(--muted)}
 p.note{color:var(--muted);font-size:.9rem}
 </style>
 </head>
 <body>
 <main>
 <div class="top"><h1>Craps – engine v0.3</h1><div class="bank">Bankroll <b id="bank"></b></div></div>
+
+<section class="stats" aria-label="Statistics">
+  <div class="sgrid">
+    <div><span>Shooters</span><b id="s-shooters">0</b></div><div><span>Rolls</span><b id="s-rolls">0</b></div>
+    <div><span>SRR</span><b id="s-srr">0.00</b></div><div><span>SOR</span><b id="s-sor">0.00</b></div>
+    <div><span>Shooter</span><b id="s-shooter">0.00</b></div><div><span>My bets</span><b id="s-bets">0</b></div>
+    <div><span>My rack</span><b id="s-rack">0</b></div><div><span>Bankroll</span><b id="s-bankroll">0</b></div>
+    <div><span>NET</span><b id="s-net">0.00</b></div>
+  </div>
+  <div class="dist" id="dist" aria-label="Roll distribution"></div>
+  <div id="shooters" style="margin-top:10px"></div>
+</section>
 
 <section class="table" aria-label="Craps table">
   <div class="stage"><div class="dice" id="dice" aria-live="polite">⚀ ⚀</div><div class="puck off" id="puck">OFF</div></div>
@@ -96,7 +115,7 @@ const $ = id => document.getElementById(id);
 const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(2);
 
 function render(msg) {
-  $("bank").textContent = "$" + fmt(game.bankroll);
+  $("bank").textContent = "$" + game.equity().toFixed(2);
   for (const k in game.bets) { $("a-" + k).textContent = fmt(game.bets[k]); }
   const p = $("puck");
   p.className = "puck " + (game.phase === "point" ? "on" : "off");
@@ -137,6 +156,26 @@ function render(msg) {
     bt.onclick = () => { const r = game.bet("hard", chip, n); render(r.ok ? "" : r.error); };
     c.appendChild(bt); hb.appendChild(c);
   });
+  const st = game.stats, sv = (id, v) => { $(id).textContent = v; };
+  const money = n => (n > 0 ? "+" : "") + n.toFixed(2);
+  sv("s-shooters", st.shooters); sv("s-rolls", st.rolls); sv("s-srr", game.srr().toFixed(2)); sv("s-sor", game.sor().toFixed(2));
+  sv("s-bets", fmt(game.atRisk())); sv("s-rack", fmt(game.bankroll)); sv("s-bankroll", game.equity().toFixed(2));
+  sv("s-shooter", money(game.shooterNet())); sv("s-net", money(game.net()));
+  [["s-shooter", game.shooterNet()], ["s-net", game.net()]].forEach(([id, v]) => { $(id).className = v > 0 ? "win" : v < 0 ? "lose" : ""; });
+  const mx = Math.max(1, ...Object.values(st.dist)), d = $("dist"); d.innerHTML = "";
+  for (let n = 2; n <= 12; n++) {
+    const c = document.createElement("div"); if (n === 7) c.className = "seven";
+    c.innerHTML = "<span>" + (st.dist[n] || "") + "</span><i style=\"height:" + Math.round(st.dist[n] / mx * 60) + "px\"></i><span>" + n + "</span>";
+    d.appendChild(c);
+  }
+  const sl = $("shooters"); sl.innerHTML = "";
+  st.shooterLog.slice(0, 8).forEach(s => {
+    const r = document.createElement("div"); r.className = "srow";
+    r.innerHTML = "<b>Shooter " + s.shooter + "</b><span>P:" + s.points + " R:" + s.rolls + "</span><b class=\"" + (s.net > 0 ? "win" : s.net < 0 ? "lose" : "") + "\">" + money(s.net) + "</b>";
+    sl.appendChild(r);
+  });
+  document.querySelectorAll(".chip").forEach(c => { c.hidden = +c.dataset.v > game.bankroll; });
+  if (chip > game.bankroll) { const ok = [...document.querySelectorAll(".chip")].filter(c => !c.hidden).pop(); if (ok) ok.click(); }
   $("msg").textContent = msg || "";
 }
 
