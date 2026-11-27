@@ -25,6 +25,7 @@ const Craps = (() => {
   function createGame(opts = {}) {
     const roller = opts.roller || randomRoller;
     const maxOdds = opts.maxOdds ?? 2;
+    const autoReplaceCome = opts.autoReplaceCome ?? true; // when an equal new come bet travels to the number that just paid a come bet, Crapsee puts the odds and a new come bet back
     const hardwaysWorkOnComeout = opts.hardwaysWorkOnComeout ?? false; // Crapsee switches Hardways and Bets off after a seven-out and back on once a point is set
     const fieldPay = t => t === 2 ? [opts.field2Pays ?? 2, 1] : t === 12 ? [opts.field12Pays ?? 2, 1] : [1, 1];
     const placeOffOnComeout = opts.placeOffOnComeout ?? true; // place / buy / lay are off on come-out rolls
@@ -37,6 +38,9 @@ const Craps = (() => {
 
     // ---- money and statistics ----
     g.startBankroll = g.bankroll; g.shooterStart = g.bankroll;
+    // Crapsee’s "Bets" and "Hardways" switches. They go on when a point is set and back to the come-out settings after a point is made or a seven-out.
+    g.switches = { bets: !placeOffOnComeout, hardways: hardwaysWorkOnComeout };
+    g.setSwitch = (name, on) => { g.switches[name] = !!on; };
     g.stats = { rolls:0, shooters:0, sevens:0, sevenOuts:0, dist:{2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0}, log:[], shooterLog:[], pointRolls:0 };
     g.atRisk = () => { // all money currently on the table
       let t = 0;
@@ -98,14 +102,32 @@ const Craps = (() => {
       return { ok:true };
     };
 
-    g.remove = (type, num) => { // take one bet down and get its stake back (line bets, odds and traveled come bets stay)
-      let amt = 0;
-      if (["place","buy","lay","hard"].includes(type)) { amt = g[type][num] || 0; delete g[type][num]; }
-      else if (type in g.bets && !["pass","dontPass","passOdds","dontPassOdds"].includes(type)) { amt = g.bets[type]; g.bets[type] = 0; }
-      else return err("That bet can\u2019t be taken down.");
-      if (!amt) return err("No such bet.");
-      g.bankroll = r2(g.bankroll + amt); return { ok:true, amount:amt };
+    // Take chips off a bet (Shift+click in the UI): reduces by amt, to zero at most, and returns that money to the rack.
+    // Not allowed: the pass line once a point is set, and come bets that have traveled to a number (contract bets).
+    g.reduce = (type, amt, num) => {
+      if (!(amt > 0)) return err("Nothing to take off.");
+      let have = 0, set;
+      if (["place","buy","lay","hard"].includes(type)) {
+        have = g[type][num] || 0; set = v => { if (v > 0) g[type][num] = v; else delete g[type][num]; };
+      } else if (type === "comeOdds" || type === "dontComeOdds") {
+        const e = (type === "comeOdds" ? g.comeBets : g.dcBets)[num];
+        if (!e || !e.odds) return err(type === "comeOdds" ? "No odds there. A come bet on a number is a contract bet and can\u2019t be reduced." : "No odds there.");
+        have = e.odds; set = v => { e.odds = v; };
+      } else if (type === "come" && num !== undefined) {
+        return err("A come bet on a number is a contract bet and can\u2019t be reduced.");
+      } else if (type === "dontCome" && num !== undefined) {
+        const e = g.dcBets[num]; if (!e) return err("No such bet.");
+        have = e.bet; set = v => { e.bet = v; if (!v) { g.bankroll = r2(g.bankroll + e.odds); delete g.dcBets[num]; } };
+      } else if (type in g.bets) {
+        if (type === "pass" && g.phase === "point") return err("The pass line is a contract bet once a point is set.");
+        have = g.bets[type]; set = v => { g.bets[type] = v; };
+      } else return err("Unknown bet.");
+      if (!have) return err("No such bet.");
+      const take = Math.min(amt, have);
+      g.bankroll = r2(g.bankroll + take); set(r2(have - take));
+      return { ok:true, removed:take, amount:take, left:r2(have - take) };
     };
+    g.remove = (type, num) => g.reduce(type, Infinity, num); // take a whole bet down
     g.takeDown = () => { // return all place / buy / lay bets to the bankroll
       let back = 0;
       for (const k of ["place","buy","lay","hard"]) { for (const n in g[k]) back += g[k][n]; g[k] = {}; }
@@ -132,12 +154,14 @@ const Craps = (() => {
       };
       const settle = (k, res, ratio) => { resolve(k, b[k], res, ratio); b[k] = 0; };
       // Traveled come bets are checked first, so a new bet isn’t hit by the roll that moves it.
+      const won = {}; // come bets paid on this roll (for the auto-replace rule)
       const off = oddsOffOnComeout && g.phase === "comeout"; // come odds don’t work on a come-out roll
       for (const n of Object.keys(g.comeBets)) {
         const e = g.comeBets[n], hit = total === +n;
         if (!hit && total !== 7) continue;
         resolve("come", e.bet, hit ? "win" : "lose", [1,1], +n);
         resolve("comeOdds", e.odds, off ? "push" : hit ? "win" : "lose", PASS_ODDS[n], +n);
+        if (hit) won[n] = { bet:e.bet, odds:e.odds };
         delete g.comeBets[n];
       }
       for (const n of Object.keys(g.dcBets)) {
@@ -149,14 +173,22 @@ const Craps = (() => {
       }
       // Newly placed come bets: first roll acts like a come-out roll, then the bet travels to its number.
       if (b.come) {
-        if (total === 7 || total === 11) settle("come","win");
-        else if (total === 2 || total === 3 || total === 12) settle("come","lose");
-        else { const e = g.comeBets[total] || (g.comeBets[total] = { bet:0, odds:0 }); e.bet = r2(e.bet + b.come); b.come = 0; }
+        if (total === 7 || total === 11) { // paid, and the bet stays up (a 7 here is a seven-out, which clears the table anyway)
+          const w = cents(b.come); g.bankroll = r2(g.bankroll + w); events.push({ bet:"come", result:"win", net:w });
+        } else if (total === 2 || total === 3 || total === 12) settle("come","lose");
+        else {
+          const e = g.comeBets[total] || (g.comeBets[total] = { bet:0, odds:0 }), amt = b.come, w = won[total];
+          e.bet = r2(e.bet + amt); b.come = 0;
+          if (autoReplaceCome && w && w.bet === amt) { // same amount as the come bet just paid: pay the winnings and leave the bets the same
+            if (w.odds > 0 && g.bankroll >= w.odds) { e.odds = r2(e.odds + w.odds); g.bankroll = r2(g.bankroll - w.odds); }
+            if (g.bankroll >= amt) { b.come = amt; g.bankroll = r2(g.bankroll - amt); }
+          }
+        }
       }
       if (b.dontCome) {
         if (total === 7 || total === 11) settle("dontCome","lose");
-        else if (total === 2 || total === 3) settle("dontCome","win");
-        else if (total === 12) settle("dontCome","push");
+        else if (total === 2 || total === 3) { const w = cents(b.dontCome); g.bankroll = r2(g.bankroll + w); events.push({ bet:"dontCome", result:"win", net:w }); } // paid, stays up
+        else if (total === 12) { /* push: the bet stays up and nothing moves */ }
         else { const e = g.dcBets[total] || (g.dcBets[total] = { bet:0, odds:0 }); e.bet = r2(e.bet + b.dontCome); b.dontCome = 0; }
       }
       const stay = (k, n, net) => { g.bankroll = r2(g.bankroll + net); events.push({ bet:k, num:n, result:"win", net }); };
@@ -171,14 +203,14 @@ const Craps = (() => {
         else settle(k, "lose");
       }
       // Hardways: win on the hard way (doubles), lose on the easy way or a 7. Winning bets stay up.
-      if (hardwaysWorkOnComeout || g.phase !== "comeout") {
+      if (g.switches.hardways) {
         for (const n of Object.keys(g.hard)) {
           if (total === +n && dice[0] === dice[1]) stay("hard", +n, cents(g.hard[n] * HARD_PAYS[n][0] / HARD_PAYS[n][1]));
           else if (total === +n || total === 7) drop("hard", n);
         }
       }
       // Place / buy / lay: off on come-out rolls by default; winning bets stay up.
-      if (!(placeOffOnComeout && g.phase === "comeout")) {
+      if (g.switches.bets) {
         for (const n of Object.keys(g.place)) {
           if (total === +n) stay("place", +n, cents(g.place[n] * PLACE_PAYS[n][0] / PLACE_PAYS[n][1]));
           else if (total === 7) drop("place", n);
@@ -198,7 +230,7 @@ const Craps = (() => {
       if (g.phase === "comeout") {
         if (total === 7 || total === 11) { lineWin("pass"); settle("dontPass","lose"); }
         else if (total === 2 || total === 3) { settle("pass","lose"); lineWin("dontPass"); }
-        else if (total === 12) { settle("pass","lose"); settle("dontPass","push"); }
+        else if (total === 12) { settle("pass","lose"); } // don\u2019t pass pushes: the bet stays up and nothing moves
         else { g.phase = "point"; g.point = total; }
       } else if (total === g.point) {
         lineWin("pass"); settle("passOdds","win", PASS_ODDS[g.point]);
@@ -210,6 +242,8 @@ const Craps = (() => {
         lineWin("dontPass"); settle("dontPassOdds","win", [d, n]); // lay odds pay the inverse
         g.phase = "comeout"; g.point = null; g.shooterRolls = 0; sevenOut = true;
       }
+      if (g.phase === "point" && !inPoint) { g.switches.bets = true; g.switches.hardways = true; }
+      else if (g.phase === "comeout" && inPoint) { g.switches.bets = !placeOffOnComeout; g.switches.hardways = hardwaysWorkOnComeout; }
       if (sevenOut) { // Crapsee clears the table after a seven-out: winning bets (lays) are paid and come down too
         g.bankroll = r2(g.bankroll + g.atRisk());
         for (const k in b) b[k] = 0;

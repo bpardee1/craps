@@ -19,11 +19,11 @@ const steps = [
   { bets:[["come",5]],                       dice:[3,2], net:2.85,   risk:51,   tally:"0,0,0,0" },
   { bets:[["comeOdds",5,5]],                 dice:[4,2], net:12.16,  risk:46,   tally:"1,1,0,-1" },
   { bets:[["come",5]],                       dice:[3,2], net:15.35,  risk:null, tally:"1,1,0,-1" },
-  { bets:[["comeOdds",5,5],["come",5],["field",1]], dice:[2,2], net:1.75, risk:42, tally:"1,1,1,0" },
+  { bets:[["field",1]],                      dice:[2,2], net:1.75,   risk:42,   tally:"1,1,1,0" }, // roll 9 already put the odds and a new come bet back (auto-replace)
   { bets:[["comeOdds",5,4]],                 dice:[3,1], net:18.75,  risk:36,   tally:"2,0,2,0" },
   { bets:[["come",5]],                       dice:[4,2], net:0.16,   risk:40,   tally:"2,1,1,0" },
   { bets:[["come",5]],                       dice:[1,5], net:6.16,   risk:null, tally:"2,1,1,-1" },
-  { bets:[["come",5],["field",1]],           dice:[3,4], net:-31.11, risk:0,    tally:"2,1,1,-1",
+  { bets:[["field",1]],                      dice:[3,4], net:-31.11, risk:0,    tally:"2,1,1,-1", // roll 13 already put a new come bet back
     after: g => { eq(g.bankroll,558.83); eq(g.net(),58.83); eq(g.shooterNet(),58.83); eq(g.srr(),14); eq(g.sor(),13);
                   eq([4,5,6,7,8,12].map(n => g.stats.dist[n]).join(","), "3,3,4,1,1,2"); } },
   // shooter 2: a come-out 7 (pass wins and stays up), then a point of 4 and a seven-out
